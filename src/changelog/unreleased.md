@@ -105,6 +105,7 @@ changelog entry.
 - On iOS, no longer act as-if the application successfully open all URLs. Override
   `application:didFinishLaunchingWithOptions:` and provide the desired behaviour yourself.
 - On X11, remove our dependency on libXcursor. (#3749)
+- On X11, fix XInput handling that prevented a new window from getting the focus. (#2841)
 
 ### Removed
 
