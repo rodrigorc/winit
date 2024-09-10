@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
-#[cfg(not(any(android_platform, ios_platform)))]
+#[cfg(not(android_platform))]
 use std::num::NonZeroU32;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
@@ -11,13 +11,13 @@ use std::{fmt, mem};
 
 use ::tracing::{error, info};
 use cursor_icon::CursorIcon;
-#[cfg(not(any(android_platform, ios_platform)))]
+#[cfg(not(android_platform))]
 use rwh_06::{DisplayHandle, HasDisplayHandle};
-#[cfg(not(any(android_platform, ios_platform)))]
+#[cfg(not(android_platform))]
 use softbuffer::{Context, Surface};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
-use winit::error::ExternalError;
+use winit::error::RequestError;
 use winit::event::{DeviceEvent, DeviceId, Ime, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{Key, ModifiersState};
@@ -76,21 +76,21 @@ struct Application {
     receiver: Receiver<Action>,
     sender: Sender<Action>,
     /// Custom cursors assets.
-    custom_cursors: Result<Vec<CustomCursor>, ExternalError>,
+    custom_cursors: Result<Vec<CustomCursor>, RequestError>,
     /// Application icon.
     icon: Icon,
     windows: HashMap<WindowId, WindowState>,
     /// Drawing context.
     ///
     /// With OpenGL it could be EGLDisplay.
-    #[cfg(not(any(android_platform, ios_platform)))]
+    #[cfg(not(android_platform))]
     context: Option<Context<DisplayHandle<'static>>>,
 }
 
 impl Application {
     fn new(event_loop: &EventLoop, receiver: Receiver<Action>, sender: Sender<Action>) -> Self {
         // SAFETY: we drop the context right before the event loop is stopped, thus making it safe.
-        #[cfg(not(any(android_platform, ios_platform)))]
+        #[cfg(not(android_platform))]
         let context = Some(
             Context::new(unsafe {
                 std::mem::transmute::<DisplayHandle<'_>, DisplayHandle<'static>>(
@@ -119,7 +119,7 @@ impl Application {
         Self {
             receiver,
             sender,
-            #[cfg(not(any(android_platform, ios_platform)))]
+            #[cfg(not(android_platform))]
             context,
             custom_cursors,
             icon,
@@ -389,7 +389,7 @@ impl ApplicationHandler for Application {
         };
 
         match event {
-            WindowEvent::Resized(size) => {
+            WindowEvent::SurfaceResized(size) => {
                 window.resize(size);
             },
             WindowEvent::Focused(focused) => {
@@ -545,7 +545,7 @@ impl ApplicationHandler for Application {
         }
     }
 
-    #[cfg(not(any(android_platform, ios_platform)))]
+    #[cfg(not(android_platform))]
     fn exiting(&mut self, _event_loop: &dyn ActiveEventLoop) {
         // We must drop the context here.
         self.context = None;
@@ -559,7 +559,7 @@ struct WindowState {
     /// Render surface.
     ///
     /// NOTE: This surface must be dropped before the `Window`.
-    #[cfg(not(any(android_platform, ios_platform)))]
+    #[cfg(not(android_platform))]
     surface: Surface<DisplayHandle<'static>, Arc<dyn Window>>,
     /// The actual winit Window.
     window: Arc<dyn Window>,
@@ -595,7 +595,7 @@ impl WindowState {
 
         // SAFETY: the surface is dropped before the `window` which provided it with handle, thus
         // it doesn't outlive it.
-        #[cfg(not(any(android_platform, ios_platform)))]
+        #[cfg(not(android_platform))]
         let surface = Surface::new(app.context.as_ref().unwrap(), Arc::clone(&window))?;
 
         let theme = window.theme().unwrap_or(Theme::Dark);
@@ -607,14 +607,14 @@ impl WindowState {
         let ime = true;
         window.set_ime_allowed(ime);
 
-        let size = window.inner_size();
+        let size = window.surface_size();
         let mut state = Self {
             #[cfg(macos_platform)]
             option_as_alt: window.option_as_alt(),
             custom_idx: app.custom_cursors.as_ref().map(Vec::len).unwrap_or(1) - 1,
             cursor_grab: CursorGrabMode::None,
             named_idx,
-            #[cfg(not(any(android_platform, ios_platform)))]
+            #[cfg(not(android_platform))]
             surface,
             window,
             theme,
@@ -681,12 +681,12 @@ impl WindowState {
 
     /// Toggle resize increments on a window.
     fn toggle_resize_increments(&mut self) {
-        let new_increments = match self.window.resize_increments() {
+        let new_increments = match self.window.surface_resize_increments() {
             Some(_) => None,
             None => Some(LogicalSize::new(25.0, 25.0).into()),
         };
         info!("Had increments: {}", new_increments.is_none());
-        self.window.set_resize_increments(new_increments);
+        self.window.set_surface_resize_increments(new_increments);
     }
 
     /// Toggle fullscreen.
@@ -725,22 +725,22 @@ impl WindowState {
         self.window.set_option_as_alt(self.option_as_alt);
     }
 
-    /// Swap the window dimensions with `request_inner_size`.
+    /// Swap the window dimensions with `request_surface_size`.
     fn swap_dimensions(&mut self) {
-        let old_inner_size = self.window.inner_size();
-        let mut inner_size = old_inner_size;
+        let old_surface_size = self.window.surface_size();
+        let mut surface_size = old_surface_size;
 
-        mem::swap(&mut inner_size.width, &mut inner_size.height);
-        info!("Requesting resize from {old_inner_size:?} to {inner_size:?}");
+        mem::swap(&mut surface_size.width, &mut surface_size.height);
+        info!("Requesting resize from {old_surface_size:?} to {surface_size:?}");
 
-        if let Some(new_inner_size) = self.window.request_inner_size(inner_size.into()) {
-            if old_inner_size == new_inner_size {
+        if let Some(new_surface_size) = self.window.request_surface_size(surface_size.into()) {
+            if old_surface_size == new_surface_size {
                 info!("Inner size change got ignored");
             } else {
-                self.resize(new_inner_size);
+                self.resize(new_surface_size);
             }
         } else {
-            info!("Request inner size is asynchronous");
+            info!("Requesting surface size is asynchronous");
         }
     }
 
@@ -793,10 +793,10 @@ impl WindowState {
         Ok(())
     }
 
-    /// Resize the window to the new size.
+    /// Resize the surface to the new size.
     fn resize(&mut self, size: PhysicalSize<u32>) {
-        info!("Resized to {size:?}");
-        #[cfg(not(any(android_platform, ios_platform)))]
+        info!("Surface resized to {size:?}");
+        #[cfg(not(android_platform))]
         {
             let (width, height) = match (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
             {
@@ -840,7 +840,7 @@ impl WindowState {
             },
         };
 
-        let win_size = self.window.inner_size();
+        let win_size = self.window.surface_size();
         let border_size = BORDER_SIZE * self.window.scale_factor();
 
         let x_direction = if position.x < border_size {
@@ -889,7 +889,7 @@ impl WindowState {
     }
 
     /// Draw the window contents.
-    #[cfg(not(any(android_platform, ios_platform)))]
+    #[cfg(not(android_platform))]
     fn draw(&mut self) -> Result<(), Box<dyn Error>> {
         if self.occluded {
             info!("Skipping drawing occluded window={:?}", self.window.id());
@@ -911,7 +911,7 @@ impl WindowState {
         Ok(())
     }
 
-    #[cfg(any(android_platform, ios_platform))]
+    #[cfg(android_platform)]
     fn draw(&mut self) -> Result<(), Box<dyn Error>> {
         info!("Drawing but without rendering...");
         Ok(())
